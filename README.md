@@ -1,1 +1,0 @@
-# spot-the-fake-photo
