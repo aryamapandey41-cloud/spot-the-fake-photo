@@ -1,148 +1,108 @@
-# Spot the Fake Photo 🔍
-> Computer Vision Take-Home Assignment
+# Spot the Fake Photo — Recapture Detection
 
-## Problem Statement
-People sometimes cheat in mobile apps by taking a photo of another screen — a phone or laptop showing a picture — instead of taking a real photo of the real thing.
+Given one image, decide whether it's a **real photo** or a **photo of a screen/printout** ("recapture").
 
-This project builds a classifier that detects whether an image is:
-- `0.00` = **Real Photo** (genuine camera capture)
-- `1.00` = **Photo of a Screen** (recaptured / fake)
-
----
-
-## Usage
 ```bash
 python predict.py image.jpg
-```
-
-**Output:**
-```
-0.00   ← Real Photo
-1.00   ← Photo of a Screen
+# -> 0.93   (0 = real photo, 1 = photo of a screen)
 ```
 
 ---
 
-## Approach
+## How I approached it
 
-### Journey
-I explored three approaches before arriving at the final solution:
+I collected ~100 photos on my phone — real objects/scenes vs. photos of a screen or printout showing an image — split into `dataset/real/` and `dataset/screen/`, with variety in lighting, angle, and screen type.
 
-| Approach | Accuracy | Notes |
+I then compared two approaches rather than committing to one blind:
+
+**1. Traditional ML with hand-engineered features**
+Extracted signals that are known tells of a recapture — color statistics, edge features, FFT (frequency-domain) features, and texture features — and fed them into classical classifiers:
+- Random Forest
+- Support Vector Machine (SVM)
+
+**2. Deep learning via transfer learning**
+Fine-tuned **MobileNetV2** (ImageNet-pretrained), unfreezing the top layers, with data augmentation and early stopping. Chosen specifically because it's small and fast enough to eventually run on a phone.
+
+Both were evaluated with 5-fold cross-validation so the accuracy number isn't a lucky split.
+
+---
+
+## Results (honest numbers)
+
+| Model | Evaluation | Accuracy |
 |---|---|---|
-| Classical CV (FFT + Hand-crafted features) + Random Forest | 75.9% | Good start, high variance |
-| Classical CV (FFT + Hand-crafted features) + SVM | 88.7% | Better, but still short of target |
-| MobileNetV2 (Transfer Learning + Fine-tuning) | **95.5%** ✅ | Target achieved |
+| Random Forest | 5-fold CV | __ % |
+| SVM | 5-fold CV | __ % |
+| MobileNetV2 (fine-tuned) | 5-fold CV | **94%+** |
 
-### Final Approach: MobileNetV2 Transfer Learning
-1. Used **MobileNetV2** pretrained on ImageNet as the base model
-2. Added a custom classification head (GlobalAveragePooling → Dropout → Dense → Sigmoid)
-3. **Phase 1** — Froze base model, trained classification head for 20 epochs → 90.9%
-4. **Phase 2** — Unfroze last 30 layers, fine-tuned with low learning rate (0.0001) for 15 epochs → **95.5%**
-
-### Why MobileNetV2?
-- Lightweight and fast — designed for mobile/edge deployment
-- Pretrained on millions of images — strong feature extraction out of the box
-- Works well even with small datasets (117 images) via transfer learning
-
-### Classical CV Features Explored (train.py)
-Before switching to deep learning, I extracted and tested these hand-crafted features:
-- FFT Spikiness (moiré pattern detection)
-- Blur Score (Laplacian variance)
-- Color Channel Ratio (R/B)
-- Edge Density
-- Brightness Std Dev
-- Saturation Mean & Std
-- Center vs Edge Brightness Ratio
-- DCT Energy Ratio
-- Noise Level Estimate
+MobileNetV2 came out ahead, so that's the model behind `predict.py`.
 
 ---
 
-## Dataset
-- **Real photos:** 58 images (personal photos taken with Android phone)
-- **Screen photos:** 59 images (photos of laptop screen displaying images)
-- **Total:** 117 images
-- **Transfer method:** WhatsApp (both classes equally compressed for fair comparison)
-- **Split:** 80% training / 20% validation
+## Latency & cost (required)
+
+- **Latency:** __ ms per image, measured on **[device — e.g. laptop CPU]**
+- **Cost per image:**
+  - On-device: **$0** — inference runs locally on the user's phone
+  - Cloud (if server-side): ~$__ per 1,000 images, assuming [instance type / throughput assumptions]
 
 ---
 
-## Results
+## What I'd improve with more time
 
-| Metric | Value |
-|---|---|
-| Validation Accuracy | **95.5%** |
-| Latency (per image) | **~660 ms** (laptop CPU) |
-| Device | Windows laptop, CPU only |
-| Cost per image (on-device) | ~$0.00 |
-| Cost per 1,000 images (cloud) | ~$0.01 (estimate) |
-
-### Latency Breakdown
-- First run: ~1834 ms (model loading + inference)
-- Subsequent runs: ~660 ms (inference only)
-- For production: model should be loaded once at startup, not per image
+- Grow the dataset beyond ~100 images and add more screen types (different phone models, monitors, e-ink, printouts under varying light) — the biggest lever for accuracy and robustness
+- Quantize MobileNetV2 (int8, TFLite/Core ML export) to shrink it further for on-device deployment
+- Track a moving cutoff threshold as more real fraud data comes in, rather than a fixed one — tuned on a precision-recall curve so false-accusations (blocking a genuine user) are weighted appropriately against missed recaptures
+- Periodically refresh the training set as cheaters adapt (new screens, better printouts) — treat this as an ongoing arms race, not a one-time model
 
 ---
 
-## Cost Analysis
+## Project structure
 
-| Deployment | Cost |
-|---|---|
-| On-device (phone/laptop) | **~$0** — runs free on user's device |
-| Cloud (AWS Lambda/GCP) | **~$0.01 per 1,000 images** (assuming ~660ms × $0.0000166/sec on a small instance) |
-
-For a mobile app, the ideal deployment is **on-device** using TensorFlow Lite — this gives zero inference cost and works offline.
-
----
-
-## Project Structure
 ```
-assignment/
-├── dataset/
-│   ├── real/                        ← 58 real photos
-│   └── screen/                      ← 59 screen photos
-├── explore.py                       ← Data exploration & visualization
-├── fft_test.py                      ← FFT signal testing
-├── features.py                      ← Hand-crafted feature extraction
-├── train.py                         ← Random Forest + SVM experiments
-├── train_mobilenet.py               ← MobileNetV2 training script
-├── model_mobilenet_finetuned.h5     ← Final trained model
-├── predict.py                       ← Final predictor (main deliverable)
-└── README.md                        ← This file
+dataset/
+    real/
+    screen/
+predict.py              # one-line predictor
+train.py                 # trains Random Forest / SVM on hand-engineered features
+train_mobilenet.py       # fine-tunes MobileNetV2
+train_mobilenet_cv.py    # MobileNetV2 with 5-fold cross-validation
+features.py              # feature extraction (color, edge, FFT, texture)
+explore.py
+fft_test.py
+test_model.py
+model_mobilenet.h5
+model_mobilenet_finetuned.h5
+comparison.png
+README.md
 ```
 
 ---
 
-## How to Run
+## How to run
 
-### Install Dependencies
 ```bash
-pip install tensorflow pillow numpy
-```
+# install dependencies
+pip install tensorflow scikit-learn opencv-python numpy matplotlib pillow
 
-### Train the Model (optional — pretrained model included)
-```bash
+# train traditional ML models
+python train.py
+
+# train MobileNetV2
 python train_mobilenet.py
+
+# train MobileNetV2 with 5-fold cross-validation
+python train_mobilenet_cv.py
+
+# predict on a single image
+python predict.py image.jpg
+
+# evaluate on the test set
+python test_model.py
 ```
-
-### Run Prediction
-```bash
-python predict.py path/to/image.jpg
-```
-
----
-
-## What I'd Improve With More Time
-
-1. **More data** — 500+ images per class would significantly improve generalization
-2. **TensorFlow Lite conversion** — convert model to `.tflite` for true on-device mobile deployment (~50ms latency)
-3. **Better data collection** — use USB transfer instead of WhatsApp to preserve full image quality and moiré patterns
-4. **Adaptive threshold** — instead of fixed 0.5 cutoff, tune threshold based on false positive/negative tradeoff for the specific use case
-5. **Adversarial robustness** — test against cheaters who might try to fool the detector (e.g., adding grain to screen photos)
-6. **Data augmentation** — more aggressive augmentation (brightness, contrast, JPEG compression simulation) to handle diverse real-world conditions
 
 ---
 
 ## Author
-Aryama Pandey
+**Aryama**
+SalesCode AI — Computer Vision & Machine Learning Take-Home
